@@ -1,0 +1,4 @@
+# Repository root – application-specific rules are in road-disruption-intel/.gitignore
+.DS_Store
+Thumbs.db
+desktop.ini

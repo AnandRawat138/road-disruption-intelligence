@@ -1,0 +1,26 @@
+# Secrets and local configuration – never commit
+.env
+.env.*
+!.env.example
+runtime/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node / build output
+frontend/node_modules/
+*.log
+
+# Data inside this folder (the shared historical data lives in ../data and IS versioned)
+/data/
+*.db-wal
+*.db-shm
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

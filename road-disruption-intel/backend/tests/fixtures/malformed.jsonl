@@ -1,0 +1,7 @@
+{"article_id": "BAD1", "title": "", "source_url": "https://example.com/a"}
+this is not json
+[1,2,3]
+{"article_id": "BAD2", "title": "Bad URL record", "source_url": "javascript:alert(1)"}
+{"title": "No identifiers at all"}
+{"article_id": "OK1", "title": "Valid record: Pune traffic jam on Sinhagad Road", "source_url": "https://example.com/pune-jam", "publication_time": "2026-09-01T10:00:00Z"}
+{"article_id": "BAD3", "title": "Ancient", "source_url": "https://example.com/old", "publication_time": "1890-01-01T00:00:00Z"}

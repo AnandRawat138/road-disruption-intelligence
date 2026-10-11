@@ -1,0 +1,9 @@
+# Road Disruption Intelligence v1 – backend runtime dependencies (Python 3.11 – 3.14)
+fastapi>=0.115,<1.0
+uvicorn>=0.30,<1.0
+SQLAlchemy>=2.0.36,<2.1
+pydantic>=2.9,<3.0
+httpx>=0.27,<1.0
+feedparser>=6.0.11,<7.0
+python-dotenv>=1.0,<2.0
+python-multipart>=0.0.12
