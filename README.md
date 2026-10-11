@@ -90,7 +90,7 @@ for example to `D:\RoadIntel`. Avoid extracting inside OneDrive/Downloads if pos
 
 **Option B – Git:**
 ```bash
-git clone <this-repository-url>
+git clone https://github.com/AnandRawat138/road-disruption-intelligence.git
 ```
 
 After extracting you should have:
