@@ -272,6 +272,7 @@ road-disruption-intel/
 | [Audit Report](road-disruption-intel/AUDIT_REPORT.md) | Review of the previous version and fixes |
 | [Test Report](road-disruption-intel/TEST_REPORT.md) | Automated and manual test results |
 | [Changelog](road-disruption-intel/CHANGELOG.md) | Version history |
+| [ML Integration Guide (PDF)](road-disruption-intel/docs/ML_INTEGRATION_GUIDE.pdf) | ML team – what, where and how to add machine learning to this repo |
 
 ## For developers
 
