@@ -43,7 +43,10 @@ Conventions
 ## Classification & LLM
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/classification/run` | `{article_ids? , filters?, limit, provider?, reclassify}` → background job |
+| POST | `/api/classification/run` | `{article_ids? , filters?, limit, provider?, engine? (llm\|ml), reclassify}` → background job. With `engine=llm` and ML fallback on, the job switches to ML if the LLM is unreachable and says so in its message |
+| GET | `/api/ml/status` | ML model metadata and cross-validated metrics, selected engine, fallback setting, records classified by ML |
+| POST | `/api/ml/train` | Train / retrain the ML model → background job (`ml_train`) |
+| POST | `/api/ml/test` | `{title, text?}` – classify a test record with the ML model (not stored); returns fields and probabilities |
 | GET | `/api/classification/stats` | Counts by status, review, relevance, model |
 | GET/PUT | `/api/llm/config` | Provider settings (no secrets) |
 | POST | `/api/llm/test` | `{provider}` – list models + tiny structured generation |
@@ -63,6 +66,8 @@ Conventions
 | POST | `/api/incidents/{id}/status` | `{status, note}` (invalid transitions → 409) |
 | POST | `/api/incidents/{id}/merge` | `{target_id, confirm: true, note}` |
 | POST | `/api/incidents/{id}/detach` | `{article_id}` |
+| GET | `/api/highways` | Highways named in open incidents or recent unverified reports. `q, type (NATIONAL_HIGHWAY,STATE_HIGHWAY,EXPRESSWAY,NAMED_HIGHWAY), report_days (1–3650, default 7), include_reports, include_stale, sort (activity\|severity\|recent\|name)` |
+| GET | `/api/highways/detail?id=` | One highway: summary, incidents, unverified reports, GeoJSON of approximate incident positions |
 | GET | `/api/map/incidents` | GeoJSON (same filters, `include_state_level`) + `meta.mapped/unmapped` |
 
 ## Sources, imports, jobs, alerts, audit, settings

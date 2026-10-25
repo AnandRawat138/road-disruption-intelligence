@@ -1,5 +1,34 @@
 # Test report
 
+## Update – version 1.1.0 (25 October 2026)
+
+**Automated backend tests – 74 passed, 0 failed, 0 skipped** (56 from 1.0.0, one adjusted, 18 new in
+`tests/test_5_highways_ml.py`).
+
+| Area | Tests | Result |
+|---|---|---|
+| Highway extraction | `test_extract_highways` (10 cases: NH/SH numbers, *National Highway 66*, `NH44`, expressways, city-pair highways, Title-Case headlines, *NHAI* not a highway), `test_highway_aliases_share_one_id` | Passed |
+| Highways API | `test_highways_api_lists_running_stale_and_unverified` (running vs stale vs unverified, resolved incidents excluded, search, stale toggle, detail, 404) | Passed |
+| ML training and metrics | `test_ml_training_reports_honest_metrics` (cross-validated, above majority baseline, metric note present) | Passed |
+| ML predictions grounded in text | `test_ml_predictions_are_grounded` (highway/city copied from text, highway names not used as the event city, severity/times never guessed, off-topic text irrelevant) | Passed |
+| ML engine | `test_ml_engine_classifies_and_links_incident` | Passed |
+| LLM unavailable → ML fallback | `test_llm_unavailable_falls_back_to_ml` (failed LLM attempt kept, ML version current), `test_classify_job_switches_to_ml_when_llm_unreachable` | Passed |
+| Engine settings & ML API | `test_engine_setting_and_ml_api` (validation, status, test endpoint, engine passed to jobs) | Passed |
+| No-fallback behaviour | `test_permanent_provider_error_not_retried_forever` now runs with `ml_fallback` off | Passed |
+
+Manual checks on a copy of the operational database (a second instance on port 8010, scheduler off, so the
+running installation and its data were not touched):
+* Highways page lists 33 highways for a 7-day report window and 51 for 30 days; selecting *Mumbai-Pune Expressway*
+  and *NH-48* shows their incidents, reports and map. Desktop (1440 px) and phone (390 px) layouts checked.
+* *Train now* trained `tfidf-logreg-…` on 1,299 records in about 6 s; metrics shown match `/api/ml/status`.
+* With Ollama pointed at an unreachable port, a 6-record and a 4-record classification job reported
+  “LLM ollama unavailable … using ML fallback”, classified every record (0 failed), and each record shows the
+  fallback note and `ml / tfidf-logreg-…` as producer.
+* Frontend type check and production build pass.
+
+---
+## Version 1.0.0
+
 Date: 11 October 2026 · Machine: Windows 11, Python 3.12.7 (venv) / 3.14, Node 25.1, 16.5 GB RAM,
 NVIDIA RTX 3060 Laptop (6 GB), Ollama 0.34.2.
 

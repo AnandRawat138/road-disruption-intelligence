@@ -48,7 +48,8 @@ export default function RecordDrawer({ id, onClose, onChanged }: { id: string; o
   }
   const reclassify = async () => {
     try {
-      const r = await api<any>('/api/classification/run', { body: { article_ids: [id], reclassify: true, provider: provider || undefined } })
+      const choice = provider === '__ml' ? { engine: 'ml' } : provider ? { engine: 'llm', provider } : {}
+      const r = await api<any>('/api/classification/run', { body: { article_ids: [id], reclassify: true, ...choice } })
       setJobId(r.job_id)
     } catch (e: any) { toast('error', e.message) }
   }
@@ -150,7 +151,7 @@ export default function RecordDrawer({ id, onClose, onChanged }: { id: string; o
                 <dt>Event time</dt><dd>{c.event_start ? fmtDate(c.event_start) : 'start not stated'} → {c.event_end ? fmtDate(c.event_end) : 'end not stated'} · <Badge>{c.time_status || 'UNKNOWN'}</Badge> <span className="muted small">(as reported at publication)</span></dd>
                 {c.reported_delay && <><dt>Reported delay</dt><dd>{c.reported_delay}</dd></>}
                 <dt>Map position</dt><dd><PrecisionBadge precision={c.geo_precision} /> {c.latitude != null && <span className="mono small">{c.latitude.toFixed(4)}, {c.longitude.toFixed(4)}</span>} <span className="muted small">{c.geo_method} {c.geo_display_name ? `· ${c.geo_display_name}` : ''}</span></dd>
-                <dt>Model confidence</dt><dd>{c.model_confidence || '—'} <span className="muted small">(model self-assessment, not a calibrated probability)</span></dd>
+                <dt>Model confidence</dt><dd>{c.model_confidence || '—'} <span className="muted small">{c.provider === 'ml' ? "(from the ML classifier's probabilities – not verified accuracy)" : '(model self-assessment, not a calibrated probability)'}</span></dd>
                 <dt>Validation</dt><dd><Badge tone={c.validation_status === 'PASSED' ? 'ok' : 'warn'}>{c.validation_status}</Badge> · evidence {c.evidence_verified ? <Badge tone="ok">found in source</Badge> : <Badge tone="warn">not verified</Badge>}</dd>
                 <dt>Produced by</dt><dd>{c.origin === 'HUMAN' ? `Human correction by ${c.created_by}` : `${c.provider} / ${c.model}`} · prompt {c.prompt_version || '—'} · {fmtDate(c.created_at)}</dd>
               </dl>
@@ -177,9 +178,10 @@ export default function RecordDrawer({ id, onClose, onChanged }: { id: string; o
                   {c && <button className="btn" onClick={startEdit}><Pencil size={14} />Edit fields</button>}
                 </div>
                 <div className="row">
-                  <select className="input" value={provider} onChange={e => setProvider(e.target.value)} aria-label="Provider for classification">
-                    <option value="">Active provider ({llm.data?.active_provider || '…'})</option>
-                    {(llm.data?.available_providers || []).map((p: string) => <option key={p} value={p}>{p}</option>)}
+                  <select className="input" value={provider} onChange={e => setProvider(e.target.value)} aria-label="Classifier to use">
+                    <option value="">Configured engine</option>
+                    {(llm.data?.available_providers || []).map((p: string) => <option key={p} value={p}>LLM: {p}</option>)}
+                    <option value="__ml">ML model (local, no LLM)</option>
                   </select>
                   <button className="btn" onClick={reclassify} disabled={!!jobId}><RotateCcw size={14} />{c ? 'Reclassify' : 'Classify now'}</button>
                 </div>

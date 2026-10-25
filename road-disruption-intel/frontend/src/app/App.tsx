@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Activity, Bell, BarChart3, Bot, FileInput, Gauge, ListChecks, Map as MapIcon, Menu, Newspaper,
-  Radio, Settings, type LucideIcon } from 'lucide-react'
+  Radio, Route as RouteIcon, Settings, type LucideIcon } from 'lucide-react'
 import { api, getOperator, getToken, setOperator, setToken, useApi } from './api'
 import { Notice, ToastProvider } from './components/ui'
 import Overview from './pages/Overview'
 import Disruptions from './pages/Disruptions'
+import Highways from './pages/Highways'
 import MapPage from './pages/MapPage'
 import Records from './pages/Records'
 import ReviewQueue from './pages/ReviewQueue'
@@ -30,6 +31,7 @@ export const usePublicSettings = () => useContext(SettingsCtx)!
 const NAV: { to: string; label: string; icon: LucideIcon; section?: string }[] = [
   { to: '/', label: 'Overview', icon: Gauge, section: 'Monitor' },
   { to: '/disruptions', label: 'Disruptions', icon: Activity },
+  { to: '/highways', label: 'Highways', icon: RouteIcon },
   { to: '/map', label: 'Interactive map', icon: MapIcon },
   { to: '/records', label: 'News & records', icon: Newspaper, section: 'Work' },
   { to: '/review', label: 'Classification queue', icon: ListChecks },
@@ -37,7 +39,7 @@ const NAV: { to: string; label: string; icon: LucideIcon; section?: string }[] =
   { to: '/reports', label: 'Analytics & reports', icon: BarChart3 },
   { to: '/sources', label: 'Sources & acquisition', icon: Radio, section: 'Configure' },
   { to: '/import', label: 'Data import', icon: FileInput },
-  { to: '/llm', label: 'LLM configuration', icon: Bot },
+  { to: '/llm', label: 'Classification engine', icon: Bot },
   { to: '/system', label: 'Settings & health', icon: Settings },
 ]
 
@@ -102,6 +104,7 @@ function Shell({ s }: { s: PublicSettings }) {
           <Routes>
             <Route path="/" element={<Overview />} />
             <Route path="/disruptions" element={<Disruptions />} />
+            <Route path="/highways" element={<Highways />} />
             <Route path="/map" element={<MapPage />} />
             <Route path="/records" element={<Records />} />
             <Route path="/review" element={<ReviewQueue />} />

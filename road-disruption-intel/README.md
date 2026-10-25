@@ -4,9 +4,10 @@
 Prepared for **Aviral Consulting (OPC) Private Limited**, Mumbai, Maharashtra, India.
 
 The application collects news about road disruptions in India (closures, diversions, accidents,
-flooding, landslides, protests, VIP movements, construction and more), uses a language model to turn
-each article into a structured record, groups related reports into incidents, and shows them on a
-dashboard, a searchable records table and an interactive map. Operators review and approve the model's
+flooding, landslides, protests, VIP movements, construction and more), uses a language model – or a
+built-in machine-learning classifier when no language model is available – to turn each article into a
+structured record, groups related reports into incidents, and shows them on a dashboard, a per-highway
+view, a searchable records table and an interactive map. Operators review and approve the model's
 output before it is treated as confirmed.
 
 > **Important:** this tool summarises *news reports*. It does not have live traffic sensors, does not
@@ -43,12 +44,13 @@ Afterwards use **`start.bat`** to start and **`stop.bat`** to stop. How to use e
 |---|---|
 | **Overview** | Live metrics from the database (records, relevant reports, review queue, active / stale incidents), category/state/city/severity charts, daily volumes, source health, recent activity. Every number links to the matching records. |
 | **Disruptions** | Incidents built from related reports, with lifecycle *New → Monitoring → Confirmed → Resolved / Dismissed*, status history, conflict notes, merge and detach. Open incidents with no recent report are shown as **stale**, never as current. |
+| **Highways** | Every national highway, state highway, expressway and named highway (e.g. *Mumbai-Goa Highway*) named in an open incident or a recent unclassified report, with running / stale / unverified counts, search (`NH-48`, `Yamuna`, `Mumbai-Pune`), type and time filters, and a detail panel with incidents, reports and an approximate map. Spelling variants are merged (*Pune-Mumbai* = *Mumbai-Pune*, *Gurgaon* = *Gurugram*). |
 | **Interactive map** | Clustered incident map (India default, focus on Mumbai and other cities), severity colour + category letters, filters shared with the list, time filter, *Fit to results*, *Reset view*, evidence panel with source links. Approximate positions are marked as approximate. |
 | **News & records** | Server-side search (keyword, city, road, `NH-48`, source), multi-filters, sorting, pagination, row selection, bulk classify/approve/reject, CSV/JSON export, detail panel with original text, evidence excerpt, model output, validation notes, history, provenance and audit trail. |
 | **Classification queue** | Records waiting for review, with the reasons they were flagged. Approve, reject or correct fields (corrections are stored as new human versions). |
 | **Sources & acquisition** | Per-source enable/schedule, search terms, places, limits, timeouts, retries, *Fetch now*, connection test, run history and health. |
 | **Data import** | Import the historical `data/` files or upload JSONL/JSON/CSV. Real counts (discovered, imported, duplicate, invalid, failed, skipped) and a downloadable error report. |
-| **LLM configuration** | Local Ollama or your own OpenAI-compatible / Anthropic key, connection test, model list, hardware-based model recommendation, model download with confirmation, test classification. |
+| **Classification engine** | Choose the **LLM** or the built-in **ML model** in Settings. LLM: local Ollama or your own OpenAI-compatible / Anthropic key, connection test, model list, hardware-based model recommendation, model download with confirmation, test classification. ML: TF-IDF + logistic regression trained on the application's own labelled records, cross-validated metrics, *Retrain now*, test box. **Automatic ML fallback** when the LLM is unavailable (each such record says so). |
 | **Analytics & reports** | Printable period summary (save as PDF from the browser), data-quality report, measured source reliability, duplicate-incident suggestions. |
 | **Settings & health** | Branding, workflow rules, alert rules, map style, API keys, health checks, backups, audit trail. |
 
@@ -76,11 +78,26 @@ not found in the article are removed, evidence excerpts are checked against the 
 records are flagged for review. Model “confidence” is the model’s own judgement, **not** a calibrated
 probability.
 
+## Built-in ML classifier
+
+* **What:** TF-IDF word and character n-grams with logistic regression (scikit-learn), three models –
+  relevance, category and time status. Code: `backend/rdi/services/ml/`.
+* **Trained on:** current LLM and human classifications in the database (approved and corrected records
+  weigh 3×, rejected records and ML outputs are excluded) and a bundled seed set (`seed_labels.jsonl`:
+  449 LLM/operator-labelled headlines plus 850 weak negatives that the keyword pre-filter rates as unlikely). It trains automatically when first
+  needed (about 10 s) and can be retrained from the UI.
+* **Measured on the current data** (5-fold cross-validation, agreement with the training labels, which are
+  mostly LLM labels – not verified accuracy): relevance 96 % accuracy (majority baseline 67 %), category
+  75 % accuracy / 0.58 macro-F1 (baseline 46 %), time status 83 % (baseline 64 %).
+* **Limits:** it never sets severity or event times (they stay *unknown*), and copies highway, road and city
+  names only when they appear in the text. The LLM remains the more complete extractor; use ML when no LLM
+  is available or for very large backlogs.
+
 ## What needs internet
 
 Live news sources, online geocoding (Nominatim), map tiles, cloud LLMs, and installing Ollama/models.
-Browsing, searching, exporting, importing, reviewing and classifying with an already-downloaded local model
-work offline (the map background will be blank offline).
+Browsing, searching, exporting, importing, reviewing, classifying with the ML model, and classifying with an
+already-downloaded local model work offline (the map background will be blank offline).
 
 ## Documentation
 
@@ -102,6 +119,8 @@ road-disruption-intel/
   .env.example            configuration template (copy to .env; .env is never committed)
   backend/
     rdi/                  application (FastAPI, SQLAlchemy, services, API)
+      services/ml/        built-in ML classifier and its seed labels
+      services/highways.py  highway-name extraction and the per-highway view
     tests/                automated tests (pytest, no network needed)
     requirements.txt
     app/, seed_*.py ...   previous version (v0), kept for reference only – not used

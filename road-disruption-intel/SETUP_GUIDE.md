@@ -96,11 +96,14 @@ Approximate requirements (4-bit models):
 | `llama3:8b` | 4.7 GB | 12 GB | Tested with this application |
 | `qwen2.5:14b` | 9 GB | 24 GB | Better quality; slow without a 10 GB+ GPU |
 
-The same steps are available in the web UI under **LLM configuration → Local LLM setup**.
+The same steps are available in the web UI under **Classification engine → Local LLM setup**.
+
+No LLM? Choose **ML model (local)** under **Classification engine**. It needs no download or key; it is
+installed with the other Python packages (scikit-learn) and trains itself the first time it is used.
 
 ## 7. Cloud AI with your own key (optional)
 
-**LLM configuration** → choose *OpenAI / OpenAI-compatible* or *Anthropic* → set base URL and model →
+**Classification engine** → choose *OpenAI / OpenAI-compatible* or *Anthropic* → set base URL and model →
 paste the key → **Save key** → **Save configuration** → **Test connection**.
 
 Where keys are stored: in `runtime\secrets.json` on this PC (plain JSON, protected by Windows file

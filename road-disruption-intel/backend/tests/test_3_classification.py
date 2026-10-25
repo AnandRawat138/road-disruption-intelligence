@@ -247,8 +247,12 @@ def test_permanent_provider_error_not_retried_forever(db, monkeypatch):
         calls["n"] += 1
         return httpx.Response(404, json={"error": "model 'x' not found"})
     art = make_article(db, "Traffic diverted for metro work in Pune", "https://example.com/pune-metro")
-    cls = classify_article(db, art, "ollama", "tester", http_client=httpx.Client(transport=httpx.MockTransport(h)),
-                           geocoder=Geocoder(db, online=False))
+    settings_store.patch(db, "classification", {"ml_fallback": False})
+    try:
+        cls = classify_article(db, art, "ollama", "tester", http_client=httpx.Client(transport=httpx.MockTransport(h)),
+                               geocoder=Geocoder(db, online=False))
+    finally:
+        settings_store.patch(db, "classification", {"ml_fallback": True})
     db.commit()
     assert cls.status == "FAILED" and calls["n"] == 1 and "MODEL_NOT_FOUND" in cls.error
 

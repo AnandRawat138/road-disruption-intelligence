@@ -49,6 +49,9 @@ DEFAULTS: dict[str, Any] = {
         "last_tests": {},
     },
     "classification": {
+        "engine": "llm",                  # llm / ml – which classifier processes records
+        "ml_fallback": True,              # use the ML model when the LLM provider is unavailable
+        "ml_relevance_threshold": 0.6,    # ML probability needed to call a record RELEVANT
         "auto_classify_new": False,
         "auto_classify_min_prefilter": "LIKELY_RELEVANT",
         "max_input_chars": 4000,

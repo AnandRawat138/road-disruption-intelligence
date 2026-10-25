@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.1.0 – 25 October 2026
+
+### Added
+* **Highways page** (`/highways`, API `/api/highways`): every national highway, state highway, expressway and named
+  highway named in an open incident or a recent unclassified report, with running / stale / unverified counts,
+  search, type and time-window filters, sorting and a detail panel (incidents, reports, approximate map).
+  Highway names are extracted only from report text (`NH-48`, `National Highway 66`, `SH 10`, *Mumbai-Pune
+  Expressway*, *Mumbai-Goa highway*, *Western Express Highway*); spelling variants and city aliases are merged.
+* **Built-in ML classifier** (`backend/rdi/services/ml/`): TF-IDF + logistic regression for relevance, category and
+  time status, trained from the database's own labels plus a bundled seed set, with cross-validated metrics.
+  Fields such as highway, road and city are copied only when they appear in the text; severity and event times
+  are never guessed.
+* **Classification engine setting** (`classification.engine = llm | ml`), **ML fallback** when the LLM is
+  unavailable (`classification.ml_fallback`, on by default) and `classification.ml_relevance_threshold`.
+  Failed LLM attempts stay in the record history; ML results are labelled `ml / tfidf-logreg-…`, prompt `ml-v1`.
+  Classification jobs probe the LLM first and switch to ML for the whole job when it is unreachable.
+* UI: *Classification engine* page (engine switch, fallback, threshold, model metrics, *Retrain now*, test box);
+  *ML model* option in the record panel's Reclassify list.
+* API: `/api/ml/status`, `/api/ml/train`, `/api/ml/test`; `engine` parameter on `/api/classification/run`.
+* 18 new automated tests (74 in total).
+
+### Changed
+* Sidebar entry *LLM configuration* renamed *Classification engine*.
+* `scikit-learn` added to `backend/requirements.txt` – run `setup_and_start.bat` once after updating.
+* User guide: new sections on the classification engine, the ML model and the Highways page, with screenshots.
+
 ## 1.0.0 – 11 October 2026
 
 Complete rebuild of the application as a client-ready local deployment. See AUDIT_REPORT.md for the

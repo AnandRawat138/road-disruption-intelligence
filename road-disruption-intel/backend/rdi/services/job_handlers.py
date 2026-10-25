@@ -12,6 +12,7 @@ from . import importer, settings_store
 from .acquisition import run_source
 from .classification.classifier import classify_article, resolve_provider_config
 from .classification.schema import PROMPT_VERSION
+from .llm.providers import LLMError, build_provider
 from .jobs import JobContext, handler
 
 log = logging.getLogger(__name__)
@@ -54,6 +55,17 @@ def select_articles_for_classification(db, params: dict) -> list[str]:
     return list(db.scalars(q.limit(limit)))
 
 
+def _llm_reachable(name: str, pcfg: dict) -> tuple[bool, str]:
+    """Quick connectivity probe so a job with an unreachable LLM switches to ML at once."""
+    try:
+        build_provider(name, {**pcfg, "timeout_seconds": min(15, int(pcfg.get("timeout_seconds", 60)))}).list_models()
+        return True, ""
+    except LLMError as e:
+        if e.kind in ("UNAVAILABLE", "TIMEOUT", "AUTH", "CONFIG", "QUOTA"):
+            return False, f"{e.kind}: {e}"
+        return True, ""  # e.g. model listing not supported – let the real call decide
+
+
 @handler("classify")
 def _classify(ctx: JobContext, params: dict) -> dict:
     provider = params.get("provider")
@@ -61,17 +73,39 @@ def _classify(ctx: JobContext, params: dict) -> dict:
     actor = params.get("actor") or "operator"
     with SessionLocal() as db:
         ids = select_articles_for_classification(db, params)
-        name, pcfg = resolve_provider_config(db, provider)
-        concurrency = max(1, min(4, int(settings_store.get(db, "classification").get("concurrency", 1))))
-        if name == "ollama":
-            concurrency = 1  # local GPU/CPU: sequential is faster and safer
+        ccfg = settings_store.get(db, "classification")
+        engine = (params.get("engine") or ccfg.get("engine") or "llm").lower()
+        fallback_note = ""
+        if engine == "llm":
+            try:
+                name, pcfg = resolve_provider_config(db, provider)
+            except LLMError as e:
+                if not ccfg.get("ml_fallback", True):
+                    raise
+                name, pcfg, engine, fallback_note = "ml", {}, "ml", f"LLM not configured ({e}) – using ML fallback"
+            if engine == "llm" and ccfg.get("ml_fallback", True):
+                ok, why = _llm_reachable(name, pcfg)
+                if not ok:
+                    engine, fallback_note = "ml", f"LLM {name} unavailable ({why[:150]}) – using ML fallback"
+        if engine == "ml":
+            from .ml import model as ml
+            try:
+                bundle = ml.ensure_model(db)
+            except ml.MLUnavailable as e:
+                return {"message": f"ML model unavailable: {e}", "_status": "FAILED"}
+            name, pcfg, prompt_version = "ml", {"model": bundle["meta"]["version"]}, ml.ML_PROMPT_VERSION
+        else:
+            prompt_version = PROMPT_VERSION
+        concurrency = max(1, min(4, int(ccfg.get("concurrency", 1))))
+        if name in ("ollama", "ml"):
+            concurrency = 1  # local GPU/CPU (and SQLite writes): sequential is faster and safer
         model = pcfg.get("model")
         if not reclassify:
-            # Avoid duplicate LLM calls for unchanged records already classified with this model/prompt.
+            # Avoid duplicate calls for unchanged records already classified with this model/prompt.
             done = set(db.scalars(select(Classification.article_id).where(
                 Classification.article_id.in_(ids), Classification.is_current.is_(True),
                 Classification.provider == name, Classification.model == model,
-                Classification.prompt_version == PROMPT_VERSION)))
+                Classification.prompt_version == prompt_version)))
             human = set(db.scalars(select(Classification.article_id).where(
                 Classification.article_id.in_(ids), Classification.is_current.is_(True), Classification.origin == "HUMAN")))
             skipped = len([i for i in ids if i in done or i in human])
@@ -85,8 +119,10 @@ def _classify(ctx: JobContext, params: dict) -> dict:
         db.commit()
     total = len(ids)
     ctx.update(total=total, processed=0, succeeded=0, failed=0,
-               message=f"Classifying {total} record(s) with {name}/{model}" + (f"; {skipped} already done" if skipped else ""))
-    counts = {"ok": 0, "failed": 0, "relevant": 0, "processed": 0}
+               message=(f"{fallback_note}. " if fallback_note else "") + f"Classifying {total} record(s) with {name}/{model}"
+               + (f"; {skipped} already done" if skipped else ""))
+    counts = {"ok": 0, "failed": 0, "relevant": 0, "processed": 0, "ml_fallback": 0}
+    state = {"engine": engine}
 
     def one(aid: str) -> str:
         with SessionLocal() as db:
@@ -94,8 +130,16 @@ def _classify(ctx: JobContext, params: dict) -> dict:
             if art is None:
                 return "missing"
             try:
-                cls = classify_article(db, art, provider_name=name, actor=actor)
+                note = fallback_note or (state.get("note") if state["engine"] == "ml" else None)
+                cls = classify_article(db, art, provider_name=None if name == "ml" else name, actor=actor,
+                                       engine=state["engine"], note=note)
                 db.commit()
+                if state["engine"] == "llm" and cls.provider == "ml":
+                    state["engine"] = "ml"  # the LLM went down mid-job: do not wait for it on every record
+                    state["note"] = f"LLM {name} became unavailable during this job – classified by the ML fallback"
+                    counts["ml_fallback"] += 1
+                elif cls.provider == "ml" and engine == "llm":
+                    counts["ml_fallback"] += 1
                 if cls.status == "VALID":
                     return "relevant" if cls.relevance == "RELEVANT" else "ok"
                 return "failed"
@@ -141,11 +185,29 @@ def _classify(ctx: JobContext, params: dict) -> dict:
                     if a.classification_status == "QUEUED":
                         a.classification_status = "CLASSIFIED" if a.current_classification_id else "UNCLASSIFIED"
             db.commit()
-    msg = (f"Processed {counts['processed']} of {total}: {counts['ok']} classified ({counts['relevant']} relevant), "
+    msg = ((f"{fallback_note}. " if fallback_note else "")
+           + f"Processed {counts['processed']} of {total}: {counts['ok']} classified ({counts['relevant']} relevant), "
            f"{counts['failed']} failed" + (f", {skipped} skipped (already classified)" if skipped else "")
+           + (f", {counts['ml_fallback']} by the ML fallback after the LLM became unavailable"
+              if counts["ml_fallback"] else "")
            + (", cancelled" if cancelled else "") + (f", {len(pending)} not processed" if pending else ""))
     status = "FAILED" if counts["failed"] and not counts["ok"] else "COMPLETED"
     return {"message": msg, **counts, "skipped": skipped, "_status": status}
+
+
+@handler("ml_train")
+def _ml_train(ctx: JobContext, params: dict) -> dict:
+    from .ml import model as ml
+    ctx.update(message="Training the ML classifier (TF-IDF + logistic regression)")
+    with SessionLocal() as db:
+        try:
+            meta = ml.train(db, actor=params.get("actor") or "operator")
+        except ml.MLUnavailable as e:
+            return {"message": str(e), "_status": "FAILED"}
+    rel = meta["metrics"]["relevance"]
+    return {"message": f"Trained {meta['version']} on {meta['training_rows']} records; relevance agreement "
+                       f"{rel.get('accuracy', 0):.1%} (cross-validated)", "version": meta["version"],
+            "_status": "COMPLETED"}
 
 
 @handler("ollama_pull")

@@ -101,8 +101,9 @@ def create_app(start_background: bool = True) -> FastAPI:
         return JSONResponse({"error": {"code": 500, "message": "Internal server error – see runtime/logs"}},
                             status_code=500)
 
-    from .api import config_api, dashboard, incidents, operations, records
-    for r in (config_api.router, dashboard.router, incidents.router, operations.router, records.router):
+    from .api import config_api, dashboard, highways, incidents, operations, records
+    for r in (config_api.router, dashboard.router, highways.router, incidents.router, operations.router,
+              records.router):
         app.include_router(r)
 
     dist = settings.frontend_dist

@@ -238,6 +238,7 @@ class ClassifyIn(BaseModel):
     filters: dict | None = None
     limit: int = Field(default=50, ge=1, le=5000)
     provider: str | None = None
+    engine: str | None = Field(default=None, pattern="^(llm|ml)$")
     reclassify: bool = False
 
 
@@ -245,15 +246,66 @@ class ClassifyIn(BaseModel):
 def run_classification(body: ClassifyIn, db: Session = Depends(get_db), actor: str = Depends(actor_from)):
     if not body.article_ids and body.filters is None:
         raise HTTPException(422, "Provide article_ids or filters")
-    try:
-        name, _ = resolve_provider_config(db, body.provider)
-    except LLMError as e:
-        raise HTTPException(422, str(e)) from e
+    ccfg = settings_store.get(db, "classification")
+    engine = body.engine or ccfg.get("engine") or "llm"
+    name = "ml"
+    if engine == "llm":
+        try:
+            name, _ = resolve_provider_config(db, body.provider)
+        except LLMError as e:
+            if not ccfg.get("ml_fallback", True):
+                raise HTTPException(422, str(e)) from e
+            name = None  # the job falls back to ML and says so
     params = body.model_dump()
-    params["provider"] = name
+    params["provider"] = name if name != "ml" else None
+    params["engine"] = engine
     params["actor"] = actor
     job = runner().submit("classify", params, actor)
-    return {"job_id": job.id, "provider": name}
+    return {"job_id": job.id, "provider": name or "ml", "engine": engine}
+
+
+# ----------------------------------------------------------------------------- ML classifier
+@router.get("/api/ml/status")
+def ml_status(db: Session = Depends(get_db)):
+    from ..services.ml import model as ml
+    ccfg = settings_store.get(db, "classification")
+    in_use = db.scalar(select(func.count(Classification.id)).where(Classification.is_current.is_(True),
+                                                                    Classification.provider == "ml")) or 0
+    return {**ml.status(), "engine": ccfg.get("engine", "llm"), "ml_fallback": ccfg.get("ml_fallback", True),
+            "ml_relevance_threshold": ccfg.get("ml_relevance_threshold", 0.6), "records_classified_by_ml": in_use}
+
+
+@router.post("/api/ml/train")
+def ml_train(db: Session = Depends(get_db), actor: str = Depends(actor_from)):
+    job = runner().submit("ml_train", {"actor": actor}, actor, dedup_key="ml_train")
+    audit.record(db, "ml", "classifier", "train_requested", actor)
+    db.commit()
+    return {"job_id": job.id}
+
+
+class MLSampleIn(BaseModel):
+    title: str = Field(min_length=3, max_length=500)
+    text: str = Field(default="", max_length=8000)
+
+
+@router.post("/api/ml/test")
+def ml_test(body: MLSampleIn, db: Session = Depends(get_db)):
+    """Classify a test record with the ML model. Nothing is written to the records database."""
+    from ..services.ml import model as ml
+    try:
+        bundle = ml.ensure_model(db)
+    except ml.MLUnavailable as e:
+        return {"ok": False, "error": {"kind": "ML_UNAVAILABLE", "message": str(e)}}
+    db.commit()
+    text = ml.model_text(body.title, body.text)
+    threshold = float(settings_store.get(db, "classification").get("ml_relevance_threshold", 0.6))
+    t0 = time.monotonic()
+    parsed, details = ml.predict_output(bundle, body.title, text, threshold)
+    fields, issues, fatal = validate_output(parsed, "\n".join(x for x in (body.title, body.text) if x), utcnow())
+    return {"ok": not fatal, "test_record": True, "provider": "ml", "model": bundle["meta"]["version"],
+            "latency_ms": int((time.monotonic() - t0) * 1000),
+            "fields": {k: (iso(v) if hasattr(v, "isoformat") else v) for k, v in fields.items()},
+            "probabilities": details, "validation_issues": issues, "fatal": fatal}
 
 
 @router.get("/api/classification/stats")
@@ -301,6 +353,11 @@ def put_setting(key: str, body: dict, db: Session = Depends(get_db), actor: str 
             raise HTTPException(422, f"{k} must be a number")
         if isinstance(v, str) and len(v) > 2000:
             raise HTTPException(422, f"{k} is too long")
+    if key == "classification":
+        if "engine" in body and body["engine"] not in ("llm", "ml"):
+            raise HTTPException(422, "engine must be 'llm' or 'ml'")
+        if "ml_relevance_threshold" in body and not (0.3 <= float(body["ml_relevance_threshold"]) <= 0.95):
+            raise HTTPException(422, "ml_relevance_threshold must be between 0.3 and 0.95")
     if key == "incidents":
         for k in ("stale_after_hours", "link_window_hours"):
             if k in body and not (1 <= float(body[k]) <= 24 * 60):

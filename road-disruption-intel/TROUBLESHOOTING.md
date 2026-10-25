@@ -49,8 +49,17 @@ Each source runs independently; one failing source never stops the others.
 | Job “Stopped after 10 consecutive failures” | Provider is down/misconfigured – fix it, then re-run; failed records keep their history |
 | Many records classified OTHER/UNKNOWN | Small local models are less accurate. Use a larger model or a cloud provider and **Reclassify** |
 
-A failing provider is never replaced automatically. Use *Reclassify* in the record panel with another
-provider, or change the active provider.
+A failing LLM provider is never replaced by another LLM provider. If **ML fallback** is ticked (Classification
+engine page, default on), records are classified by the built-in ML model while the LLM is unavailable and say so
+under *Validation notes*; reclassify them with the LLM once it is back. You can also use *Reclassify* in the record
+panel with another provider, or change the active provider.
+
+| Problem | Cause | Fix |
+|---|---|---|
+| “scikit-learn is not installed” on the Classification engine page | Packages from before version 1.1 | Run `setup_and_start.bat` once (installs the updated requirements) |
+| “Not enough labelled records to train” | Fewer than 30 relevant and 30 non-relevant labels available | The bundled seed set normally covers this; check that `backend/rdi/services/ml/seed_labels.jsonl` exists |
+| ML model cannot be loaded after a Python/scikit-learn upgrade | The saved model belongs to another library version | Press **Retrain now** (the old file is replaced) |
+| A highway is missing from the Highways page | No open incident or recent report names it | Widen *Unverified reports from*, tick *Include stale incidents*, or fetch and classify recent news |
 
 ## Map
 

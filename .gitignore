@@ -2,3 +2,9 @@
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local working folder (not part of the application)
+paper_revision/
+
+# Local editor/agent settings
+.claude/

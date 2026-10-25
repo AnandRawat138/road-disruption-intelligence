@@ -203,8 +203,9 @@ export default function Records({ reviewMode = false }: { reviewMode?: boolean }
       )}
       {confirm?.kind === 'classify-all' && (
         <Confirm title={`Classify up to ${confirm.n.toLocaleString('en-IN')} record(s)?`} confirmLabel="Start classification"
-                 message={<>Records matching the current filters (newest first) are sent to the active LLM provider in the background.
-                   Already-classified records with the same model and prompt are skipped. With a local model this takes roughly 5–15 seconds per record; cloud providers may incur API charges.</>}
+                 message={<>Records matching the current filters (newest first) are classified in the background by the engine chosen under
+                   Classification engine – the active LLM provider or the local ML model. If the LLM cannot be reached and ML fallback is on, the ML model takes over and each record says so.
+                   Already-classified records with the same model and prompt are skipped. With a local LLM this takes roughly 5–15 seconds per record (the ML model takes milliseconds); cloud providers may incur API charges.</>}
                  onCancel={() => setConfirm(null)} onConfirm={() => { setConfirm(null); classify({ filters: effective, limit: confirm.n }) }} />
       )}
     </div>

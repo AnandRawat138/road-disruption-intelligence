@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from 'react'
-import { Download, KeyRound, Plug, Save, Trash2 } from 'lucide-react'
+import { Bot, Cpu, Download, KeyRound, Plug, RefreshCw, Save, Trash2 } from 'lucide-react'
 import { api, fmtDate, useApi } from '../api'
 import { Badge, Card, Confirm, ErrorBox, JobProgress, Loading, Notice, useToast } from '../components/ui'
 
@@ -32,6 +32,116 @@ function SecretField({ name, status, onChanged }: { name: string; status: any; o
       {status?.source === 'environment' && <span className="xs muted">Set via environment/.env – change it there.</span>}
       {confirm && <Confirm title={`Remove ${name}?`} danger confirmLabel="Remove key" message="The key is deleted from runtime/secrets.json. Classification with this provider will stop working until a new key is set." onCancel={() => setConfirm(false)} onConfirm={remove} />}
     </div>
+  )
+}
+
+const pct = (v?: number) => (v === undefined || v === null ? '—' : `${(v * 100).toFixed(1)}%`)
+
+function MetricRow({ label, m }: { label: string; m: any }) {
+  if (!m) return null
+  if (!m.evaluated) return <tr><td>{label}</td><td colSpan={4} className="muted small">Not evaluated – {m.reason}</td></tr>
+  return (
+    <tr>
+      <td>{label}</td><td>{m.n?.toLocaleString('en-IN')}</td><td>{pct(m.accuracy)}</td><td>{pct(m.macro_f1)}</td>
+      <td>{pct(m.majority_baseline)}{m.labelled_only && <div className="xs muted">labelled rows only: {pct(m.labelled_only.accuracy)} acc · {pct(m.labelled_only.macro_f1)} F1</div>}
+        {m.not_learned?.length > 0 && <div className="xs muted">too few examples: {m.not_learned.join(', ')}</div>}</td>
+    </tr>
+  )
+}
+
+function EnginePanel() {
+  const toast = useToast()
+  const st = useApi<any>('/api/ml/status')
+  const [form, setForm] = useState<any>(null)
+  const [trainJob, setTrainJob] = useState<string | null>(null)
+  const [sample, setSample] = useState('Landslide blocks Mumbai-Goa highway near Ratnagiri, traffic halted')
+  const [res, setRes] = useState<any>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { if (st.data && !form) setForm({ engine: st.data.engine, ml_fallback: st.data.ml_fallback, ml_relevance_threshold: st.data.ml_relevance_threshold }) }, [st.data, form])
+  if (st.error) return <ErrorBox error={st.error} onRetry={st.reload} />
+  if (!st.data || !form) return <Loading />
+  const d = st.data
+  const meta = d.model
+  const save = async () => {
+    try {
+      await api('/api/settings/classification', { method: 'PUT', body: { ...form, ml_relevance_threshold: Number(form.ml_relevance_threshold) } })
+      toast('ok', `Classification engine saved: ${form.engine === 'ml' ? 'ML model' : 'LLM'}`); st.reload()
+    } catch (e: any) { toast('error', e.message) }
+  }
+  const train = async () => {
+    try { const r = await api<any>('/api/ml/train', { method: 'POST' }); setTrainJob(r.job_id) } catch (e: any) { toast('error', e.message) }
+  }
+  const test = async () => {
+    setBusy(true); setRes(null)
+    try { setRes(await api('/api/ml/test', { body: { title: sample } })); st.reload() } catch (e: any) { setRes({ ok: false, error: { message: e.message } }) } finally { setBusy(false) }
+  }
+  return (
+    <Card title={<div style={{ flex: 1 }}><h2>Classification engine</h2><div className="small muted">Choose what classifies records. The LLM reads the full text and extracts every field; the ML model is a fast local text classifier (TF-IDF features + logistic regression) that needs no LLM.</div></div>}
+          actions={<button className="btn primary" onClick={save}><Save size={14} />Save engine</button>}>
+      <div className="stack">
+        <div className="row" role="radiogroup" aria-label="Classification engine">
+          {[{ id: 'llm', label: 'LLM (active provider below)' }, { id: 'ml', label: 'ML model (local)' }].map(o => (
+            <button key={o.id} type="button" role="radio" aria-checked={form.engine === o.id} className={`btn ${form.engine === o.id ? 'primary' : ''}`}
+                    onClick={() => setForm({ ...form, engine: o.id })}>{o.id === 'llm' ? <Bot size={14} /> : <Cpu size={14} />}{o.label}</button>
+          ))}
+          {d.engine !== form.engine && <Badge tone="warn">unsaved</Badge>}
+        </div>
+        <div className="form-grid">
+          <label className="check"><input type="checkbox" checked={!!form.ml_fallback} disabled={form.engine === 'ml'} onChange={e => setForm({ ...form, ml_fallback: e.target.checked })} />
+            Fall back to the ML model when the LLM is unavailable</label>
+          <label className="field">ML relevance threshold
+            <input className="input" type="number" min={0.3} max={0.95} step={0.05} value={form.ml_relevance_threshold} onChange={e => setForm({ ...form, ml_relevance_threshold: e.target.value })} />
+            <span className="hint">Probability needed to mark a record relevant. Records within 0.2 below it are marked “needs review”.</span></label>
+        </div>
+        <Notice kind="info">
+          With the LLM engine and fallback on, a record whose LLM call fails (Ollama not running, timeout, invalid key, no credits…) keeps the failed attempt in its history and is then
+          classified by the ML model; a classification job switches to ML for the remaining records as soon as the LLM is found unavailable. ML results show provider <code>ml</code> and
+          the model version. The ML model sets relevance, category and time status, and copies highway, road and city names only when they appear in the text. It never guesses severity or event times – those stay unknown.
+        </Notice>
+        <div className="section-title">ML model</div>
+        {!d.sklearn_installed ? <Notice kind="error">scikit-learn is not installed. Run <code>setup_and_start.bat</code> again to install the updated requirements.</Notice> : !meta ? (
+          <Notice kind="warn">No ML model has been trained yet. It is trained automatically the first time it is needed, or press <strong>Train now</strong>.</Notice>
+        ) : (
+          <div className="stack" style={{ gap: 8 }}>
+            <div className="small">Model <span className="mono">{meta.version}</span> · trained {fmtDate(meta.trained_at)} by {meta.trained_by} · {meta.training_rows.toLocaleString('en-IN')} training records
+              ({Object.entries(meta.by_origin).map(([k, v]) => `${k.replace('_', ' ')} ${v}`).join(', ')}) · {d.records_classified_by_ml.toLocaleString('en-IN')} current record(s) classified by ML</div>
+            <div className="table-wrap">
+              <table className="table">
+                <thead><tr><th>Model</th><th>Examples</th><th>Accuracy</th><th>Macro F1</th><th>Majority baseline</th></tr></thead>
+                <tbody>
+                  <MetricRow label="Relevance" m={meta.metrics.relevance} />
+                  <MetricRow label="Category" m={meta.metrics.category} />
+                  <MetricRow label="Time status" m={meta.metrics.time_status} />
+                </tbody>
+              </table>
+            </div>
+            <div className="xs muted">{meta.metric_note} Training data: current LLM and human classifications (approved and corrected records weigh 3×; rejected records and ML outputs are excluded),
+              the bundled seed set, and weak negatives (unclassified records the keyword pre-filter rates as unlikely). Retrain after reviewing or correcting records to use your decisions.</div>
+          </div>
+        )}
+        <div className="row">
+          <button className="btn" onClick={train} disabled={!!trainJob || !d.sklearn_installed}><RefreshCw size={14} />{meta ? 'Retrain now' : 'Train now'}</button>
+        </div>
+        {trainJob && <JobProgress jobId={trainJob} compact onDone={j => { setTrainJob(null); toast(j.status === 'COMPLETED' ? 'ok' : 'error', j.message || j.status); st.reload() }} />}
+        <div className="section-title">Try the ML model (test only – nothing is saved)</div>
+        <div className="row" style={{ flexWrap: 'nowrap' }}>
+          <input className="input" style={{ flex: 1 }} value={sample} onChange={e => setSample(e.target.value)} aria-label="Test headline for the ML model" />
+          <button className="btn" onClick={test} disabled={busy || sample.trim().length < 3}>{busy ? 'Classifying…' : 'Classify with ML'}</button>
+        </div>
+        {res && (res.ok ? (
+          <div className="stack" style={{ gap: 6 }}>
+            <div className="row small">
+              <Badge tone={res.fields.relevance === 'RELEVANT' ? 'ok' : res.fields.relevance === 'NEEDS_REVIEW' ? 'warn' : 'neutral'}>{res.fields.relevance}</Badge>
+              {res.fields.relevance !== 'IRRELEVANT' && <><Badge>{res.fields.category}</Badge><Badge>{res.fields.time_status}</Badge></>}
+              <Badge tone="neutral">confidence {res.fields.model_confidence}</Badge>
+              <span className="muted">P(relevant) = {pct(res.probabilities.relevance?.RELEVANT)} · {res.latency_ms} ms</span>
+            </div>
+            <dl className="kv">{['city', 'state', 'highway_number', 'road_name'].filter(k => res.fields[k]).map(k => <Fragment key={k}><dt>{k}</dt><dd>{res.fields[k]}</dd></Fragment>)}</dl>
+            {res.probabilities.category && <div className="xs muted">Category probabilities: {Object.entries(res.probabilities.category).sort((a: any, b: any) => b[1] - a[1]).slice(0, 4).map(([k, v]: any) => `${k} ${pct(v)}`).join(' · ')}</div>}
+          </div>
+        ) : <Notice kind="error">{res.error?.message || 'Failed'}</Notice>)}
+      </div>
+    </Card>
   )
 }
 
@@ -79,10 +189,11 @@ export default function LLMSettings() {
   return (
     <div className="stack">
       <div className="page-head">
-        <div><h1>LLM configuration</h1>
-          <div className="sub">Choose the model that classifies records: a local Ollama model or your own cloud provider. Keys stay on the server and are never sent to the browser. The provider is never switched automatically – each classification records the provider and model used.</div></div>
-        <div className="actions"><button className="btn primary" onClick={save}><Save size={14} />Save configuration</button></div>
+        <div><h1>Classification engine</h1>
+          <div className="sub">Choose what classifies records – an LLM (local Ollama or your own cloud provider) or the local ML model – and configure both. Keys stay on the server and are never sent to the browser. LLM providers are never switched automatically; only the ML fallback (if enabled) steps in when the LLM is unavailable, and each classification records the provider and model used.</div></div>
+        <div className="actions"><button className="btn primary" onClick={save}><Save size={14} />Save LLM configuration</button></div>
       </div>
+      <EnginePanel />
       <Notice kind="info">{cfg.data.secret_storage}</Notice>
 
       <Card title="Active provider">

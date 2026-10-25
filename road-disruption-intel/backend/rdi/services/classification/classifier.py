@@ -8,6 +8,7 @@ with another provider.
 """
 from __future__ import annotations
 
+import json
 import logging
 import random
 import time
@@ -78,10 +79,26 @@ def _call_with_retries(provider, system: str, user: str, retries: int) -> tuple[
 
 
 def classify_article(db: Session, article: Article, provider_name: str | None = None, actor: str = "system",
-                     http_client: httpx.Client | None = None, geocoder: Geocoder | None = None) -> Classification:
+                     http_client: httpx.Client | None = None, geocoder: Geocoder | None = None,
+                     engine: str | None = None, note: str | None = None) -> Classification:
+    """Classify with the configured engine.
+
+    ``engine`` overrides the ``classification.engine`` setting (``llm`` or ``ml``).
+    With the LLM engine, a provider failure (unreachable, timeout, authentication,
+    quota …) is recorded as a failed attempt and – if ``ml_fallback`` is enabled –
+    the article is then classified by the local ML model, labelled as such.
+    ``note`` is recorded on ML classifications (e.g. why a job switched to the ML fallback).
+    """
     ccfg = settings_store.get(db, "classification")
-    name, pcfg = resolve_provider_config(db, provider_name)
-    provider = build_provider(name, pcfg, http_client)
+    if (engine or ccfg.get("engine") or "llm").lower() == "ml":
+        return classify_with_ml(db, article, actor, geocoder, note=note)
+    try:
+        name, pcfg = resolve_provider_config(db, provider_name)
+        provider = build_provider(name, pcfg, http_client)
+    except LLMError as e:
+        if ccfg.get("ml_fallback", True):
+            return classify_with_ml(db, article, actor, geocoder, note=f"LLM provider not usable ({e.kind}): {e}")
+        raise
     source_text = article_source_text(article)
     user = build_user_prompt(article.title, article.source_name, article.published_at, article.retrieved_at,
                              source_text, int(ccfg.get("max_input_chars", 4000)))
@@ -101,7 +118,11 @@ def classify_article(db: Session, article: Article, provider_name: str | None = 
         cls.status, cls.error = "FAILED", str(e)[:2000]
         cls.latency_ms = int((time.monotonic() - t0) * 1000)
         cls.validation_status = "FAILED"
-        return _store(db, article, cls, actor, link=False)
+        failed = _store(db, article, cls, actor, link=False)
+        if ccfg.get("ml_fallback", True):
+            return classify_with_ml(db, article, actor, geocoder,
+                                    note=f"LLM {name} unavailable ({e.kind}) – classified by the ML fallback")
+        return failed
 
     cls.latency_ms = int((time.monotonic() - t0) * 1000)
     cls.raw_output = (raw_text or "")[:20000]
@@ -111,8 +132,40 @@ def classify_article(db: Session, article: Article, provider_name: str | None = 
         cls.status, cls.validation_status = "INVALID", "FAILED"
         cls.error = "; ".join(attempt_errors) or "model output was not valid JSON"
         return _store(db, article, cls, actor, link=False)
+    return _finish(db, article, cls, parsed, source_text, ccfg, actor, geocoder,
+                   [f"succeeded after retry ({len(attempt_errors)} failed attempt(s))"] if attempt_errors else [])
 
+
+def classify_with_ml(db: Session, article: Article, actor: str = "system", geocoder: Geocoder | None = None,
+                     note: str | None = None) -> Classification:
+    """Classify with the local ML model (TF-IDF + logistic regression)."""
+    from ..ml import model as ml
+    ccfg = settings_store.get(db, "classification")
+    source_text = article_source_text(article)
+    article.classification_attempts = (article.classification_attempts or 0) + 1
+    cls = Classification(id=new_id("CLS_"), article_id=article.id, origin="MODEL", provider="ml", model=None,
+                         prompt_version=ml.ML_PROMPT_VERSION, created_by=actor, input_chars=len(source_text))
+    t0 = time.monotonic()
+    try:
+        bundle = ml.ensure_model(db)
+        title = strip_publisher_suffix(article.title or "", article.source_name)
+        text = ml.model_text(article.title, article.summary_text, article.source_name)
+        parsed, details = ml.predict_output(bundle, title, text, float(ccfg.get("ml_relevance_threshold", 0.6)))
+    except ml.MLUnavailable as e:
+        cls.status, cls.validation_status, cls.error = "FAILED", "FAILED", f"ML model unavailable: {e}"[:2000]
+        cls.latency_ms = int((time.monotonic() - t0) * 1000)
+        return _store(db, article, cls, actor, link=False)
+    cls.model = bundle["meta"]["version"]
+    cls.latency_ms = int((time.monotonic() - t0) * 1000)
+    cls.raw_output = json.dumps({"output": parsed, "probabilities": details}, ensure_ascii=False)[:20000]
+    return _finish(db, article, cls, parsed, source_text, ccfg, actor, geocoder, [note] if note else [])
+
+
+def _finish(db: Session, article: Article, cls: Classification, parsed: dict, source_text: str, ccfg: dict,
+            actor: str, geocoder: Geocoder | None, extra_issues: list[str]) -> Classification:
+    """Validate a parsed model output, resolve the location and store the classification."""
     fields, issues, fatal = validate_output(parsed, source_text, article.published_at)
+    issues = extra_issues + issues
     if fatal:
         cls.status, cls.validation_status = "INVALID", "FAILED"
         cls.error = "; ".join(fatal)
@@ -134,8 +187,6 @@ def classify_article(db: Session, article: Article, provider_name: str | None = 
     cls.state = state_c or city_state
     if not cls.city and cls.state in CITY_STATES:
         cls.city = CITY_STATES[cls.state]  # union territories that are a single city
-    if attempt_errors:
-        issues.append(f"succeeded after retry ({len(attempt_errors)} failed attempt(s))")
     cls.status = "VALID"
 
     if cls.relevance in ("RELEVANT", "NEEDS_REVIEW"):
