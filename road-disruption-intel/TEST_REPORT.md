@@ -2,7 +2,7 @@
 
 ## Update – version 1.1.0 (25 October 2026)
 
-**Automated backend tests – 74 passed, 0 failed, 0 skipped** (56 from 1.0.0, one adjusted, 18 new in
+**Automated backend tests – 75 passed, 0 failed, 0 skipped** (56 from 1.0.0, one adjusted, 19 new in
 `tests/test_5_highways_ml.py`).
 
 | Area | Tests | Result |
@@ -13,6 +13,7 @@
 | ML predictions grounded in text | `test_ml_predictions_are_grounded` (highway/city copied from text, highway names not used as the event city, severity/times never guessed, off-topic text irrelevant) | Passed |
 | ML engine | `test_ml_engine_classifies_and_links_incident` | Passed |
 | LLM unavailable → ML fallback | `test_llm_unavailable_falls_back_to_ml` (failed LLM attempt kept, ML version current), `test_classify_job_switches_to_ml_when_llm_unreachable` | Passed |
+| ML never replaces LLM/human results | `test_ml_never_replaces_an_existing_llm_result` (fallback during reclassify keeps the LLM result; ML job skips LLM-classified records) | Passed |
 | Engine settings & ML API | `test_engine_setting_and_ml_api` (validation, status, test endpoint, engine passed to jobs) | Passed |
 | No-fallback behaviour | `test_permanent_provider_error_not_retried_forever` now runs with `ml_fallback` off | Passed |
 

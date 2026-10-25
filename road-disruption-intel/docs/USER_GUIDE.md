@@ -127,7 +127,9 @@ Sidebar → **Classification engine**. Two kinds of classifier are available:
    the cloud key is wrong or out of credits, or the request times out, the record is then classified by the ML model
    instead of failing. The failed LLM attempt stays in the record's history, and the record shows the note
    *“LLM … unavailable – classified by the ML fallback”*. A classification job switches to ML for all remaining
-   records as soon as it finds the LLM unavailable, so you do not wait for timeouts.
+   records as soon as it finds the LLM unavailable, so you do not wait for timeouts. The fallback only fills gaps:
+   a record that already has an LLM classification or a human correction keeps it. To replace existing results with
+   ML on purpose, choose **ML model** in the record panel's Reclassify list (or the ML engine with *reclassify*).
 3. **ML relevance threshold** (default 0.6) – how sure the ML model must be before it calls a record *relevant*.
    Records slightly below it are marked *needs review*.
 4. Press **Save engine**.

@@ -10,7 +10,7 @@ from ..db.models import Article, Classification
 from ..db.session import SessionLocal
 from . import importer, settings_store
 from .acquisition import run_source
-from .classification.classifier import classify_article, resolve_provider_config
+from .classification.classifier import has_llm_or_human_result, classify_article, resolve_provider_config
 from .classification.schema import PROMPT_VERSION
 from .llm.providers import LLMError, build_provider
 from .jobs import JobContext, handler
@@ -112,6 +112,14 @@ def _classify(ctx: JobContext, params: dict) -> dict:
             ids = [i for i in ids if i not in done and i not in human]
         else:
             skipped = 0
+        if engine == "ml" and (fallback_note or not reclassify):
+            # The ML model fills gaps; it never replaces an existing LLM or human classification unless the
+            # operator explicitly reclassifies with the ML engine.
+            keep = set(db.scalars(select(Classification.article_id).where(
+                Classification.article_id.in_(ids), Classification.is_current.is_(True),
+                Classification.status == "VALID", Classification.provider != "ml")))
+            skipped += len([i for i in ids if i in keep])
+            ids = [i for i in ids if i not in keep]
         for i in range(0, len(ids), 500):
             chunk = ids[i:i + 500]
             for a in db.scalars(select(Article).where(Article.id.in_(chunk))):
@@ -121,7 +129,7 @@ def _classify(ctx: JobContext, params: dict) -> dict:
     ctx.update(total=total, processed=0, succeeded=0, failed=0,
                message=(f"{fallback_note}. " if fallback_note else "") + f"Classifying {total} record(s) with {name}/{model}"
                + (f"; {skipped} already done" if skipped else ""))
-    counts = {"ok": 0, "failed": 0, "relevant": 0, "processed": 0, "ml_fallback": 0}
+    counts = {"ok": 0, "failed": 0, "relevant": 0, "processed": 0, "ml_fallback": 0, "kept": 0}
     state = {"engine": engine}
 
     def one(aid: str) -> str:
@@ -130,6 +138,10 @@ def _classify(ctx: JobContext, params: dict) -> dict:
             if art is None:
                 return "missing"
             try:
+                if state["engine"] == "ml" and engine == "llm" and has_llm_or_human_result(db, art):
+                    art.classification_status = "CLASSIFIED"  # keep the existing LLM/human result
+                    db.commit()
+                    return "kept"
                 note = fallback_note or (state.get("note") if state["engine"] == "ml" else None)
                 cls = classify_article(db, art, provider_name=None if name == "ml" else name, actor=actor,
                                        engine=state["engine"], note=note)
@@ -161,7 +173,9 @@ def _classify(ctx: JobContext, params: dict) -> dict:
             for fut in as_completed([pool.submit(one, aid) for aid in window]):
                 r = fut.result()
                 counts["processed"] += 1
-                if r == "failed":
+                if r == "kept":
+                    counts["kept"] += 1
+                elif r == "failed":
                     counts["failed"] += 1
                     consecutive_fail += 1
                 else:
@@ -190,6 +204,7 @@ def _classify(ctx: JobContext, params: dict) -> dict:
            f"{counts['failed']} failed" + (f", {skipped} skipped (already classified)" if skipped else "")
            + (f", {counts['ml_fallback']} by the ML fallback after the LLM became unavailable"
               if counts["ml_fallback"] else "")
+           + (f", {counts['kept']} kept their existing LLM/human classification" if counts["kept"] else "")
            + (", cancelled" if cancelled else "") + (f", {len(pending)} not processed" if pending else ""))
     status = "FAILED" if counts["failed"] and not counts["ok"] else "COMPLETED"
     return {"message": msg, **counts, "skipped": skipped, "_status": status}

@@ -96,7 +96,7 @@ def classify_article(db: Session, article: Article, provider_name: str | None = 
         name, pcfg = resolve_provider_config(db, provider_name)
         provider = build_provider(name, pcfg, http_client)
     except LLMError as e:
-        if ccfg.get("ml_fallback", True):
+        if ccfg.get("ml_fallback", True) and not has_llm_or_human_result(db, article):
             return classify_with_ml(db, article, actor, geocoder, note=f"LLM provider not usable ({e.kind}): {e}")
         raise
     source_text = article_source_text(article)
@@ -119,7 +119,7 @@ def classify_article(db: Session, article: Article, provider_name: str | None = 
         cls.latency_ms = int((time.monotonic() - t0) * 1000)
         cls.validation_status = "FAILED"
         failed = _store(db, article, cls, actor, link=False)
-        if ccfg.get("ml_fallback", True):
+        if ccfg.get("ml_fallback", True) and not has_llm_or_human_result(db, article):
             return classify_with_ml(db, article, actor, geocoder,
                                     note=f"LLM {name} unavailable ({e.kind}) – classified by the ML fallback")
         return failed
@@ -134,6 +134,12 @@ def classify_article(db: Session, article: Article, provider_name: str | None = 
         return _store(db, article, cls, actor, link=False)
     return _finish(db, article, cls, parsed, source_text, ccfg, actor, geocoder,
                    [f"succeeded after retry ({len(attempt_errors)} failed attempt(s))"] if attempt_errors else [])
+
+
+def has_llm_or_human_result(db: Session, article: Article) -> bool:
+    """The ML fallback fills gaps only: a valid LLM or human classification is never replaced by it."""
+    cur = db.get(Classification, article.current_classification_id) if article.current_classification_id else None
+    return cur is not None and cur.status == "VALID" and cur.provider != "ml"
 
 
 def classify_with_ml(db: Session, article: Article, actor: str = "system", geocoder: Geocoder | None = None,

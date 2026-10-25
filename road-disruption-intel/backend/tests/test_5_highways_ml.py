@@ -173,3 +173,27 @@ def test_classify_job_switches_to_ml_when_llm_unreachable(db, trained):
     for a in arts:
         cls = db.get(Classification, db.get(Article, a.id).current_classification_id)
         assert cls.provider == "ml" and any("ML fallback" in i for i in cls.validation_issues)
+
+
+def test_ml_never_replaces_an_existing_llm_result(db, trained, monkeypatch):
+    import json
+    from test_3_classification import good_output, ollama_client
+    from rdi.services.job_handlers import _classify
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    art = make_article(db, "NH-48 closed near Vasai after truck overturns", "https://example.com/keep-llm-1")
+    llm = classify_article(db, art, "ollama", "tester", geocoder=Geocoder(db, online=False),
+                           http_client=ollama_client([json.dumps(good_output(evidence_excerpt="NH-48 closed near Vasai"))]))
+    db.commit()
+    assert llm.provider == "ollama" and llm.is_current
+
+    def down(req):
+        raise httpx.ConnectError("connection refused")
+    # LLM down while reclassifying: the failure is recorded, the LLM result stays current, no ML replacement
+    again = classify_article(db, art, "ollama", "tester", geocoder=Geocoder(db, online=False),
+                             http_client=httpx.Client(transport=httpx.MockTransport(down)))
+    db.commit()
+    assert again.status == "FAILED" and db.get(Article, art.id).current_classification_id == llm.id
+    # An ML job without "reclassify" skips records that already have an LLM classification
+    out = _classify(_Ctx(), {"article_ids": [art.id], "engine": "ml", "actor": "tester"})
+    db.expire_all()
+    assert out["skipped"] == 1 and db.get(Article, art.id).current_classification_id == llm.id

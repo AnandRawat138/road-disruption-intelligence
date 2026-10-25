@@ -95,7 +95,7 @@ function EnginePanel() {
         </div>
         <Notice kind="info">
           With the LLM engine and fallback on, a record whose LLM call fails (Ollama not running, timeout, invalid key, no credits…) keeps the failed attempt in its history and is then
-          classified by the ML model; a classification job switches to ML for the remaining records as soon as the LLM is found unavailable. ML results show provider <code>ml</code> and
+          classified by the ML model; a classification job switches to ML for the remaining records as soon as the LLM is found unavailable. The fallback only fills gaps: a record that already has an LLM or human classification keeps it. ML results show provider <code>ml</code> and
           the model version. The ML model sets relevance, category and time status, and copies highway, road and city names only when they appear in the text. It never guesses severity or event times – those stay unknown.
         </Notice>
         <div className="section-title">ML model</div>

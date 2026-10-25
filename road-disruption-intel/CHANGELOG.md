@@ -16,10 +16,12 @@
   unavailable (`classification.ml_fallback`, on by default) and `classification.ml_relevance_threshold`.
   Failed LLM attempts stay in the record history; ML results are labelled `ml / tfidf-logreg-…`, prompt `ml-v1`.
   Classification jobs probe the LLM first and switch to ML for the whole job when it is unreachable.
+  The ML model fills gaps only: it never replaces an existing LLM or human classification unless the operator
+  explicitly reclassifies with the ML engine.
 * UI: *Classification engine* page (engine switch, fallback, threshold, model metrics, *Retrain now*, test box);
   *ML model* option in the record panel's Reclassify list.
 * API: `/api/ml/status`, `/api/ml/train`, `/api/ml/test`; `engine` parameter on `/api/classification/run`.
-* 18 new automated tests (74 in total).
+* 19 new automated tests (75 in total).
 
 ### Changed
 * Sidebar entry *LLM configuration* renamed *Classification engine*.
